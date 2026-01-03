@@ -1,0 +1,96 @@
+name: GitLab Sync
+
+on:
+  push:
+    branches:
+      - prod
+  schedule:
+    - cron: "0 0 * * *" # runs nightly @ midnight utc
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+    ################################
+      # Step 01: Check Repository
+    ################################
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+    ################################
+      # Step 02: Set SSH
+    ################################
+      - name: Set SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+    #########################################
+      # Step 03: Import GPG & Configure Git
+    #########################################
+      - name: Import GPG & Configure Git
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec' | head -n1 | cut -d: -f5)
+          echo "Using GPG key: $GPG_KEY_ID"
+
+          git config --global user.name "Bryan M. Wolf"
+          git config --global user.email "25882029-bryanmichaelwolf@users.noreply.gitlab.com"
+          git config --global user.signingkey "$GPG_KEY_ID"
+          git config --global commit.gpgSign true
+
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+
+          gpgconf --kill gpg-agent
+    ##################################
+      # Step 04: Fetch GitLab Remote
+    ##################################
+      - name: Fetch GitLab Remote
+        run: |
+          git fetch git@gitlab.com:bryanmichaelwolf/pkmnsleep.git prod || echo "Branch may not exist yet"
+    #######################################
+      # Step 05: Check GitHub/GitLab Diff
+    #######################################
+      - name: Check GitHub/GitLab Diff
+        id: diffcheck
+        run: |
+          GH_SHA=$(git rev-parse origin/prod)
+          GL_SHA=$(git rev-parse FETCH_HEAD || echo "missing")
+          echo "GitHub SHA: $GH_SHA"
+          echo "GitLab SHA: $GL_SHA"
+          if [ "$GH_SHA" = "$GL_SHA" ]; then
+            echo "match=true" >> $GITHUB_OUTPUT
+          else
+            echo "match=false" >> $GITHUB_OUTPUT
+          fi
+    #####################################
+      # Step 06: Skip Sync (No Changes)
+    #####################################
+      - name: Skip Sync (No Changes)
+        if: steps.diffcheck.outputs.match == 'true'
+        run: echo "No changes detected. Skipping sync."
+    ##################################
+      # Step 07: Test SSH Connection
+    ##################################
+      - name: Test SSH connection to GitLab
+        if: steps.diffcheck.outputs.match == 'false'
+        run: ssh -T git@gitlab.com || true
+    #############################
+      # Step 08: Sync To GitLab
+    #############################
+      - name: Sync To GitLab
+        if: steps.diffcheck.outputs.match == 'false'
+        run: |
+          git remote add gitlab git@gitlab.com:bryanmichaelwolf/pkmnsleep.git
+          git push gitlab prod --force
