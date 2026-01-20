@@ -58,7 +58,7 @@ jobs:
     ##################################
       - name: Fetch GitLab Remote
         run: |
-          git fetch git@gitlab.com:bryanmichaelwolf/pkmnsleep.git prod || echo "Branch may not exist yet"
+          git fetch git@gitlab.com:bryanmichaelwolf/project-goodcamp.git prod || echo "Branch may not exist yet"
     #######################################
       # Step 05: Check GitHub/GitLab Diff
     #######################################
@@ -92,5 +92,5 @@ jobs:
       - name: Sync To GitLab
         if: steps.diffcheck.outputs.match == 'false'
         run: |
-          git remote add gitlab git@gitlab.com:bryanmichaelwolf/pkmnsleep.git
+          git remote add gitlab git@gitlab.com:bryanmichaelwolf/project-goodcamp.git
           git push gitlab prod --force
